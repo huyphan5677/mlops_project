@@ -36,11 +36,18 @@ def run_pipeline(start_date=None, end_date=None):
     Args:
         start_date: Start date cho extract data
     """
+    # convert to datetime
+    start_date = datetime.strptime(start_date, "%Y-%m-%d %H:%M:%S")
+    end_date = datetime.strptime(end_date, "%Y-%m-%d %H:%M:%S")
+
+    start_date = int(start_date.timestamp() * 1000)
+    end_date = int(end_date.timestamp() * 1000)
+
     # Các tham số cố định
     mode = 'full_pipeline'
-    minio_host = 'localhost:9000'
-    minio_access_key = 'admin'
-    minio_secret_key = '12345678'
+    minio_host = 'minio:9000'
+    minio_access_key = 'minio_user'
+    minio_secret_key = 'minio_password'
     bucket_name = 'btc-prediction'
     api_key = "RVMmqTn1fS3qfq35f4HA2z93T0NCIGHsrqqP9lvbb639Aor9OLw1h5B2hM6jWffq"
     api_secret = "vTaHbz55Gn0z40Gwqt8ZCmDmWHnAWRNRHL6QjS0xpO6kTfDhgOSP9wvRU96wEM4g"
@@ -65,10 +72,11 @@ def run_pipeline(start_date=None, end_date=None):
             start_date=start_date,
             end_date=end_date
         )
-                
+
         if mode == 'extract_only':
             return raw_data
-    
+    print("raw_data.shape :", raw_data.shape)
+    print(raw_data)
     if mode in ['transform_only', 'full_pipeline']:
         print("=== BƯỚC 2: TRANSFORM DỮ LIỆU ===")
         
@@ -77,7 +85,8 @@ def run_pipeline(start_date=None, end_date=None):
         if mode == 'transform_only':
             raw_data = read_raw_data_from_minio(
                 bucket_name=bucket_name,
-                start_date=start_date
+                start_date=start_date,
+                end_date=end_date
             )
             
             if raw_data is None:
@@ -88,14 +97,15 @@ def run_pipeline(start_date=None, end_date=None):
         if mode == 'full_pipeline':
             raw_data_from_minio = read_raw_data_from_minio(
                 bucket_name=bucket_name,
-                start_date=start_date
+                start_date=start_date,
+                end_date=end_date                                
             )
             if raw_data_from_minio is not None:
                 raw_data = raw_data_from_minio
         
         # Transform data sử dụng function từ transform.py
         processed_data = generate_features(dataframes=raw_data.copy())
-        
+
         # Lưu processed data vào MinIO
         save_processed_data_to_minio(
             df=processed_data,
@@ -110,18 +120,8 @@ def run_pipeline(start_date=None, end_date=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Bitcoin Data Pipeline - Extract và Transform')
     parser.add_argument('--start-date', type=str, help='Start date (e.g., "1 Jan, 2020" hoặc "2025-01-01")')
+    parser.add_argument('--end-date', type=str, default="2025-10-17 11:00:00", help='Start date (e.g., "1 Jan, 2020" hoặc "2025-01-01")')
     args = parser.parse_args()
-
-    # convert to datetime
-    start_date = datetime.strptime(args.start_date, "%Y-%m-%d %H:%M:%S")
-    end_date = datetime.now()
-
-    start_timestamp_ms = int(start_date.timestamp() * 1000)
-    end_timestamp_ms = int(end_date.timestamp() * 1000)
-
+    print("start pipeline")
     # Chạy pipeline
-    result = run_pipeline(start_date=start_timestamp_ms, end_date=end_timestamp_ms)
-    if result is not None:
-        print(f"Thời gian từ: {result['datetime'].min()}")
-        print(f"Thời gian đến: {result['datetime'].max()}")
-            
+    result = run_pipeline(start_date=args.start_date, end_date=args.end_date)

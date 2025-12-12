@@ -6,43 +6,73 @@ import io
 from datetime import datetime, timedelta
 from minio import Minio
 from pandas.api.indexers import FixedForwardWindowIndexer
+import pyarrow.dataset as ds
 
-def read_raw_data_from_minio(bucket_name, start_date=None, end_date=None):
 
-    # convert start_date (timestamp in ms) to datetime and hour
-    start_date = datetime.fromtimestamp(start_date / 1000)
-    hour = start_date.hour
-    
+import pyarrow.dataset as ds
+import pyarrow.fs as fs
+
+def read_data_from_minio(s3_path, storage_options, start_date, end_date):
+    # Khởi tạo kết nối MinIO qua S3FileSystem
+    s3 = fs.S3FileSystem(
+        access_key=storage_options["key"],
+        secret_key=storage_options["secret"],
+        endpoint_override=storage_options["endpoint_url"],
+        scheme="http" if not storage_options.get("use_ssl", False) else "https",
+    )
+
+    # Tạo dataset
+    dataset = ds.dataset(s3_path, format="parquet", filesystem=s3)
+
+    # Lọc dữ liệu theo thời gian
+    filter_expr = (ds.field("Open_time") >= start_date) & (ds.field("Open_time") <= end_date)
+
+    # Đọc dữ liệu
+    table = dataset.to_table(filter=filter_expr, use_threads=True, 
+                             )
+
+    df = table.to_pandas()
+    return df
+
+
+def read_raw_data_from_minio(bucket_name, prefix="raw", start_date=None, end_date=None, minio_endpoint='minio:9000'):
+
     # Sử dụng pandas read_parquet với S3 storage options và filters
     # Setup storage options for MinIO
     storage_options = {
-        'key': 'admin',
-        'secret': '12345678', 
-        'endpoint_url': 'http://localhost:9000',
+        'key': 'minio_user',
+        'secret': 'minio_password', 
+        'endpoint_url': minio_endpoint,
         'use_ssl': False
     }
     
     # Tạo S3 path
-    s3_path = f"s3://{bucket_name}/raw/"
-    
+    s3_path = f"{bucket_name}/{prefix}/"
+    print("s3_path :", s3_path)
     # Đọc với pandas và áp dụng filters
     # Convert date to string format for comparison
-    date_str = start_date.date().strftime('%Y-%m-%d')
-    
-    df = pd.read_parquet(
-        s3_path,
-        storage_options=storage_options,
-        filters=[
-            ('date', '>=', date_str)
-        ],
-        engine='pyarrow'
-    )
+    print("start_date :", start_date)
+    print("end_date :", end_date)
+
+    print("storage_options :", storage_options)
+
+    df = read_data_from_minio(s3_path, storage_options, start_date, end_date)
+    print("df.shape :", df.shape)
     # Sắp xếp theo thời gian
-    df = df[df['datetime'] >= start_date]
-    df = df.sort_values('datetime').reset_index(drop=True)
+    df = df[df['Open_time'] >= start_date]
+    df = df.sort_values('Open_time').reset_index(drop=True)
     
     return df
-    
+
+def get_hour(x):
+   x = x/1000
+   x = datetime.fromtimestamp(x)
+   return x.hour
+
+def get_day(x):
+  x = x/1000
+  x = datetime.fromtimestamp(x)
+  return x.day
 
 def save_processed_data_to_minio(df, minio_client, bucket_name):
     """
@@ -54,6 +84,10 @@ def save_processed_data_to_minio(df, minio_client, bucket_name):
         minio_client.make_bucket(bucket_name)
         print(f"Bucket '{bucket_name}' đã được tạo")
     
+    df['date'] = df['Open_time'].apply(lambda x: datetime.fromtimestamp(x / 1000).date())
+    df['hour'] = df['Open_time'].apply(get_hour).astype(int)
+
+    print("df.columns :", df.columns)
     # Group theo partition và lưu từng file
     grouped = df.groupby(['date', 'hour'])
 

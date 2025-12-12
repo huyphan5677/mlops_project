@@ -5,7 +5,8 @@ import io
 from pathlib import Path
 from minio import Minio
 from binance import Client, ThreadedWebsocketManager, ThreadedDepthCacheManager
-from datetime import datetime
+import pytz
+from datetime import datetime, timedelta, timezone
 
 def get_hour(x):
   x = x/1000
@@ -43,7 +44,7 @@ def save_to_minio_partitioned(df, minio_client, bucket_name):
     df['hour'] = df['Open_time'].apply(get_hour).astype(int)
     df['datetime'] = df['Open_time'].apply(lambda x: datetime.fromtimestamp(x / 1000))
     df['date'] = df['Open_time'].apply(lambda x: datetime.fromtimestamp(x / 1000).date())
-    
+    print(df)
     # Group theo partition date và lưu từng file
     grouped = df.groupby(['date', 'hour'])
 
@@ -76,12 +77,14 @@ def save_to_minio_partitioned(df, minio_client, bucket_name):
 
 def get_data(api_key, api_secret, minio_client, bucket_name, start_date, end_date):
     client = Client(api_key, api_secret, testnet=False)
+    print("start_date          :", start_date)
+    print("end_date            :", end_date)
 
-    _start = datetime.fromtimestamp(start_date / 1000).strftime("%Y-%m-%d %H:%M:%S")
-    _end = datetime.fromtimestamp(end_date / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    _start = datetime.fromtimestamp(start_date/1000 - 25200).strftime("%Y-%m-%d %H:%M:%S")
+    _end = datetime.fromtimestamp(end_date/1000 - 25200).strftime("%Y-%m-%d %H:%M:%S")
     print(f"Đang lấy dữ liệu BTC từ {_start} đến {_end}")
 
-    klines = client.get_historical_klines(symbol ="BTCUSDT", interval='1h', start_str=start_date, end_str=end_date)
+    klines = client.get_historical_klines(symbol ="BTCUSDT", interval='1h', start_str=_start, end_str=_end)
 
     df = pd.DataFrame(klines, columns =["Open_time", "Open", "High", "Low", "Close", "Volume", 
                                         "Close_time", "Quote_asset_volume", "Number_of_trades",
@@ -89,9 +92,18 @@ def get_data(api_key, api_secret, minio_client, bucket_name, start_date, end_dat
     
     df[["Open", "High", "Low", "Close", "Volume"]] = df[["Open", "High", "Low", "Close", "Volume"]].apply(pd.to_numeric)
 
-    df["date"] = df.Open_time.apply(lambda x : datetime.fromtimestamp(x/1000))
-
+    df["Open_time"] = df["Open_time"].apply(lambda x : ((x + 25200000)))
+    df["date"] = df["Open_time"].apply(lambda x : datetime.fromtimestamp(x/1000+ 25200))
+    print("-"*100)
+    print(df )
+    print("-"*100)
     # Lưu vào MinIO
     save_to_minio_partitioned(df, minio_client, bucket_name)
 
     return df
+
+# 1760504400 000
+# 1760504400
+
+#      25 200 000 
+# 1760517720 000
