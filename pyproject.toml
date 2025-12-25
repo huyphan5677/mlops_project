@@ -1,0 +1,69 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "btc_prediction"
+version = "0.0.1"
+description = "A short description of the project."
+authors = [
+  { name = "Your name (or your organization/company/team)" },
+]
+
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    
+]
+requires-python = "~=3.10.0"
+dependencies = [
+  # 3rd party
+  "loguru",
+  "pandas",
+  "minio",
+  "scikit-learn",
+  "boto3",
+  "pyarrow",
+  "ydata_profiling",
+  "setuptools",
+  "python-binance",
+  "psycopg2-binary",
+  # type checking
+  "typer",
+  "ruff>=0.9.7",
+  "pylint>=3.3.4",
+  "pytest-cov",
+  "python-dotenv",
+  "pytest>=8.3.4",
+  "pytest-clarity>=1.0.1",
+  "pytest-cov>=6.0.0",
+  "pytest-mock>=3.14.0",
+  "pytest-pretty>=1.2.0",
+  "pytest-randomly>=3.16.0",
+  "pytest-instafail>=0.5.0",
+  "pytest-benchmark>=5.1.0",
+  "respx>=0.22.0",
+  "pytest-asyncio>=0.26.0",
+]
+
+
+[tool.ruff]
+line-length = 99
+src = ["btc_prediction"]
+include = ["pyproject.toml", "btc_prediction/**/*.py"]
+
+[tool.ruff.lint]
+extend-select = ["I"]  # Add import sorting
+
+[tool.ruff.lint.isort]
+known-first-party = ["btc_prediction"]
+force-sort-within-sections = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+  "ignore:.*websockets.*:DeprecationWarning",
+  "ignore:.*binance.*:DeprecationWarning",
+  "ignore::DeprecationWarning:matplotlib.*",
+  "ignore::DeprecationWarning:pyparsing.*",
+]
