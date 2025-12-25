@@ -1,4 +1,55 @@
-site_name: mlops_project
-# 
-site_author: Your name (or your organization/company/team)
-# 
+site_name: BTC Prediction MLOps Project
+site_author: MLOps Team
+site_description: Bitcoin Price Prediction using MLOps Pipeline
+
+theme:
+  name: material
+  palette:
+    primary: indigo
+    accent: indigo
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Data Pipeline: architecture/data-pipeline.md
+      - ML Pipeline: architecture/ml-pipeline.md
+  - User Guide:
+      - Installation: guide/installation.md
+      - Configuration: guide/configuration.md
+      - Running Pipeline: guide/running-pipeline.md
+      - Model Training: guide/model-training.md
+  - API Reference:
+      - Data Pipeline: api/data-pipeline.md
+      - BTC Prediction: api/btc-prediction.md
+      - Models: api/models.md
+  - Development:
+      - Setup: development/setup.md
+      - Testing: development/testing.md
+      - CI/CD: development/cicd.md
+  - Deployment:
+      - Docker: deployment/docker.md
+      - Airflow: deployment/airflow.md
+      - Monitoring: deployment/monitoring.md
+
+plugins:
+  - search
+  - mkdocstrings
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed
+  - pymdownx.tasklist
+  - toc:
+      permalink: true
