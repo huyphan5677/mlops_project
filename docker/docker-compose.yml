@@ -1,0 +1,244 @@
+version: '3.8'
+
+services:
+  # === 1. PostgreSQL (Airflow metadata) ===
+  postgres:
+    image: postgres:13
+    container_name: airflow_postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow_password
+      POSTGRES_DB: airflow_metadata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow_metadata"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - ./volumes/postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: always
+
+  # === 2. Analytics Database (Metabase + Data Warehouse) ===
+  analytics_db:
+    image: postgres:13
+    container_name: analytics_db
+    environment:
+      POSTGRES_USER: user_metabase
+      POSTGRES_PASSWORD: secure_password
+      POSTGRES_DB: metabase  # DB mặc định cho Metabase metadata
+    volumes:
+      - ./volumes/analytics_db_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d  # Init data_warehouse DB
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user_metabase -d metabase"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: always
+
+  # === 3. Airflow Services ===
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command: -c "airflow db init && airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow_password@postgres:5432/airflow_metadata
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__ASTRO_S3__CONN_ID: minio_s3
+      AIRFLOW_UID: 50000
+    volumes:
+      - ./volumes/airflow_dags:/opt/airflow/dags
+      - ./volumes/airflow_logs:/opt/airflow/logs
+      - ./volumes/airflow_plugins:/opt/airflow/plugins
+      - /root/MLOPS_project/mlops_project:/opt/airflow/mlops_project
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./volumes/airflow_dags:/opt/airflow/dags
+      - ./volumes/airflow_logs:/opt/airflow/logs
+      - ./volumes/airflow_plugins:/opt/airflow/plugins
+      - /root/MLOPS_project/mlops_project:/opt/airflow/mlops_project
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow_password@postgres:5432/airflow_metadata
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    healthcheck:
+      test: ["CMD-SHELL", "curl --silent --fail http://localhost:8080/health"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airflow-scheduler
+    command: scheduler
+    volumes:
+      - ./volumes/airflow_dags:/opt/airflow/dags
+      - ./volumes/airflow_logs:/opt/airflow/logs
+      - ./volumes/airflow_plugins:/opt/airflow/plugins
+      - /root/MLOPS_project/mlops_project:/opt/airflow/mlops_project
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow_password@postgres:5432/airflow_metadata
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+
+  # === 4. MinIO (S3 Storage) ===
+  minio:
+    image: minio/minio
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minio_user
+      MINIO_ROOT_PASSWORD: minio_password
+    volumes:
+      - ./volumes/minio_data:/data
+    command: server /data --console-address ":9001"
+    restart: always
+
+  # === 5. Jenkins (CI/CD) ===
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: jenkins
+    privileged: true
+    user: root
+    ports:
+      - "8081:8080"
+      - "50000:50000"
+    volumes:
+      - ./volumes/jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
+    environment:
+      JENKINS_OPTS: "--prefix=/jenkins"
+    depends_on:
+      - gitea
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:50000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: always
+  
+  gitea-init:
+    image: gitea/gitea:1.21 
+    container_name: gitea_init
+    depends_on:
+      gitea:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    user: "1000:1000"
+    volumes:
+      - ./volumes/gitea_data:/data
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - ADMIN_USER=${GITEA_ADMIN_USER:-gitea}     
+      - ADMIN_PASS=${GITEA_ADMIN_PASS:-gitea123}   
+      - ADMIN_EMAIL=${GITEA_ADMIN_EMAIL:-admin@localhost}
+    command: >
+      bash -c '
+        echo "Waiting for Gitea Main Service to generate configs..."
+        # Loop check file config
+        while [ ! -f /data/gitea/conf/app.ini ]; do sleep 2; done
+        sleep 5
+        
+        echo "Creating Admin User ($$ADMIN_USER)..."
+        /usr/local/bin/gitea admin user create --admin \
+          --username "$$ADMIN_USER" \
+          --password "$$ADMIN_PASS" \
+          --email "$$ADMIN_EMAIL" \
+          --config /data/gitea/conf/app.ini || echo "Admin user already exists or creation failed"
+          
+        echo "Done! Exiting..."
+      '
+    restart: "no"
+
+  gitea:
+    image: gitea/gitea:1.21
+    container_name: gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=postgres
+      - GITEA__database__HOST=postgres:5432
+      - GITEA__database__NAME=gitea
+      - GITEA__database__USER=airflow
+      - GITEA__database__PASSWD=airflow_password
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__webhook__ALLOWED_HOST_LIST=jenkins,jenkins:8081
+      - GITEA__server__DOMAIN=gitea
+      - GITEA__server__SSH_DOMAIN=gitea
+      - GITEA__server__SSH_PORT=22
+      - GITEA__server__ROOT_URL=http://gitea:3000/
+    volumes:
+      - ./volumes/gitea_data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3001:3000"
+      - "2222:22"
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # === 6. Metabase (Analytics & Visualization) ===
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    ports:
+      - "3000:3000"
+    environment:
+      # Cấu hình DB metadata của Metabase
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_ADMIN_EMAIL: hoangnv.ai@gmail.com
+      MB_ADMIN_PASSWORD: zxnUJU43
+      MB_DB_PORT: 5432
+      MB_DB_USER: user_metabase
+      MB_DB_PASS: secure_password
+      MB_DB_HOST: analytics_db
+      # Optional: Cấu hình bổ sung
+      MB_EMOJI_IN_LOGS: "false"
+      JAVA_OPTS: "-Xmx1g"
+    volumes:
+      - ./volumes/metabase_data:/metabase-data
+    restart: always
+    depends_on:
+      analytics_db:
+        condition: service_healthy

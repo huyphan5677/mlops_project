@@ -1,0 +1,20 @@
+# awscli
+# loguru
+# mkdocs
+# # pip
+# python-dotenv
+# ruff
+# tqdm
+# typer
+pandas
+minio
+python-binance
+cryptography
+requests
+aiohttp
+pyarrow
+fsspec
+s3fs
+scikit-learn
+psycopg2-binary 
+# -e .
